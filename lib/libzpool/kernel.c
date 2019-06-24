@@ -20,6 +20,7 @@
  */
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2018 by Delphix. All rights reserved.
  * Copyright (c) 2016 Actifio, Inc. All rights reserved.
  */
 
@@ -339,6 +340,13 @@ cv_wait(kcondvar_t *cv, kmutex_t *mp)
 	mp->m_owner = pthread_self();
 }
 
+int
+cv_wait_sig(kcondvar_t *cv, kmutex_t *mp)
+{
+	cv_wait(cv, mp);
+	return (1);
+}
+
 clock_t
 cv_timedwait(kcondvar_t *cv, kmutex_t *mp, clock_t abstime)
 {
@@ -437,6 +445,7 @@ seq_printf(struct seq_file *m, const char *fmt, ...)
 void
 procfs_list_install(const char *module,
     const char *name,
+    mode_t mode,
     procfs_list_t *procfs_list,
     int (*show)(struct seq_file *f, void *p),
     int (*show_header)(struct seq_file *f),
@@ -812,7 +821,8 @@ __dprintf(boolean_t dprint, const char *file, const char *func,
 		if (dprintf_find_string("pid"))
 			(void) printf("%d ", getpid());
 		if (dprintf_find_string("tid"))
-			(void) printf("%u ", (uint_t)pthread_self());
+			(void) printf("%ju ",
+			    (uintmax_t)(uintptr_t)pthread_self());
 		if (dprintf_find_string("cpu"))
 			(void) printf("%u ", getcpuid());
 		if (dprintf_find_string("time"))

@@ -94,13 +94,19 @@ _NOTE(CONSTCOND) } while (0)
 #define	BF64_GET_SB(x, low, len, shift, bias)	\
 	((BF64_GET(x, low, len) + (bias)) << (shift))
 
+/*
+ * We use ASSERT3U instead of ASSERT in these macros to prevent a lint error in
+ * the case where val is a constant.  We can't fix ASSERT because it's used as
+ * an expression in several places in the kernel; as a result, changing it to
+ * the do{} while() syntax to allow us to _NOTE the CONSTCOND is not an option.
+ */
 #define	BF32_SET_SB(x, low, len, shift, bias, val) do { \
-	ASSERT(IS_P2ALIGNED(val, 1U << shift)); \
+	ASSERT3U(IS_P2ALIGNED(val, 1U << shift), !=, B_FALSE); \
 	ASSERT3S((val) >> (shift), >=, bias); \
 	BF32_SET(x, low, len, ((val) >> (shift)) - (bias)); \
 _NOTE(CONSTCOND) } while (0)
 #define	BF64_SET_SB(x, low, len, shift, bias, val) do { \
-	ASSERT(IS_P2ALIGNED(val, 1ULL << shift)); \
+	ASSERT3U(IS_P2ALIGNED(val, 1ULL << shift), !=, B_FALSE); \
 	ASSERT3S((val) >> (shift), >=, bias); \
 	BF64_SET(x, low, len, ((val) >> (shift)) - (bias)); \
 _NOTE(CONSTCOND) } while (0)
@@ -402,6 +408,7 @@ _NOTE(CONSTCOND) } while (0)
 typedef enum bp_embedded_type {
 	BP_EMBEDDED_TYPE_DATA,
 	BP_EMBEDDED_TYPE_RESERVED, /* Reserved for an unintegrated feature. */
+	BP_EMBEDDED_TYPE_REDACTED,
 	NUM_BP_EMBEDDED_TYPES = BP_EMBEDDED_TYPE_RESERVED
 } bp_embedded_type_t;
 
@@ -602,6 +609,14 @@ _NOTE(CONSTCOND) } while (0)
 #define	BP_IS_HOLE(bp) \
 	(!BP_IS_EMBEDDED(bp) && DVA_IS_EMPTY(BP_IDENTITY(bp)))
 
+#define	BP_SET_REDACTED(bp) \
+{							\
+	BP_SET_EMBEDDED(bp, B_TRUE);			\
+	BPE_SET_ETYPE(bp, BP_EMBEDDED_TYPE_REDACTED);	\
+}
+#define	BP_IS_REDACTED(bp) \
+	(BP_IS_EMBEDDED(bp) && BPE_GET_ETYPE(bp) == BP_EMBEDDED_TYPE_REDACTED)
+
 /* BP_IS_RAIDZ(bp) assumes no block compression */
 #define	BP_IS_RAIDZ(bp)		(DVA_GET_ASIZE(&(bp)->blk_dva[0]) > \
 				BP_GET_PSIZE(bp))
@@ -678,6 +693,13 @@ _NOTE(CONSTCOND) } while (0)
 		    (u_longlong_t)BPE_GET_LSIZE(bp),			\
 		    (u_longlong_t)BPE_GET_PSIZE(bp),			\
 		    (u_longlong_t)bp->blk_birth);			\
+	} else if (BP_IS_REDACTED(bp)) {				\
+		len += func(buf + len, size - len,			\
+		    "REDACTED [L%llu %s] size=%llxL birth=%lluL",	\
+		    (u_longlong_t)BP_GET_LEVEL(bp),			\
+		    type,						\
+		    (u_longlong_t)BP_GET_LSIZE(bp),			\
+		    (u_longlong_t)bp->blk_birth);			\
 	} else {							\
 		for (int d = 0; d < BP_GET_NDVAS(bp); d++) {		\
 			const dva_t *dva = &bp->blk_dva[d];		\
@@ -738,6 +760,24 @@ typedef enum spa_import_type {
 	SPA_IMPORT_ASSEMBLE
 } spa_import_type_t;
 
+/*
+ * Send TRIM commands in-line during normal pool operation while deleting.
+ *	OFF: no
+ *	ON: yes
+ */
+typedef enum {
+	SPA_AUTOTRIM_OFF = 0,	/* default */
+	SPA_AUTOTRIM_ON
+} spa_autotrim_t;
+
+/*
+ * Reason TRIM command was issued, used internally for accounting purposes.
+ */
+typedef enum trim_type {
+	TRIM_TYPE_MANUAL = 0,
+	TRIM_TYPE_AUTO = 1,
+} trim_type_t;
+
 /* state manipulation functions */
 extern int spa_open(const char *pool, spa_t **, void *tag);
 extern int spa_open_rewind(const char *pool, spa_t **, void *tag,
@@ -764,15 +804,17 @@ extern void spa_inject_delref(spa_t *spa);
 extern void spa_scan_stat_init(spa_t *spa);
 extern int spa_scan_get_stats(spa_t *spa, pool_scan_stat_t *ps);
 
-#define	SPA_ASYNC_CONFIG_UPDATE	0x01
-#define	SPA_ASYNC_REMOVE	0x02
-#define	SPA_ASYNC_PROBE		0x04
-#define	SPA_ASYNC_RESILVER_DONE	0x08
-#define	SPA_ASYNC_RESILVER	0x10
-#define	SPA_ASYNC_AUTOEXPAND	0x20
-#define	SPA_ASYNC_REMOVE_DONE	0x40
-#define	SPA_ASYNC_REMOVE_STOP	0x80
-#define	SPA_ASYNC_INITIALIZE_RESTART	0x100
+#define	SPA_ASYNC_CONFIG_UPDATE			0x01
+#define	SPA_ASYNC_REMOVE			0x02
+#define	SPA_ASYNC_PROBE				0x04
+#define	SPA_ASYNC_RESILVER_DONE			0x08
+#define	SPA_ASYNC_RESILVER			0x10
+#define	SPA_ASYNC_AUTOEXPAND			0x20
+#define	SPA_ASYNC_REMOVE_DONE			0x40
+#define	SPA_ASYNC_REMOVE_STOP			0x80
+#define	SPA_ASYNC_INITIALIZE_RESTART		0x100
+#define	SPA_ASYNC_TRIM_RESTART			0x200
+#define	SPA_ASYNC_AUTOTRIM_RESTART		0x400
 
 /*
  * Controls the behavior of spa_vdev_remove().
@@ -790,6 +832,8 @@ extern int spa_vdev_remove(spa_t *spa, uint64_t guid, boolean_t unspare);
 extern boolean_t spa_vdev_remove_active(spa_t *spa);
 extern int spa_vdev_initialize(spa_t *spa, nvlist_t *nv, uint64_t cmd_type,
     nvlist_t *vdev_errlist);
+extern int spa_vdev_trim(spa_t *spa, nvlist_t *nv, uint64_t cmd_type,
+    uint64_t rate, boolean_t partial, boolean_t secure, nvlist_t *vdev_errlist);
 extern int spa_vdev_setpath(spa_t *spa, uint64_t guid, const char *newpath);
 extern int spa_vdev_setfru(spa_t *spa, uint64_t guid, const char *newfru);
 extern int spa_vdev_split_mirror(spa_t *spa, char *newname, nvlist_t *config,
@@ -887,6 +931,7 @@ typedef struct spa_stats {
 	spa_history_kstat_t	io_history;
 	spa_history_list_t	mmp_history;
 	spa_history_kstat_t	state;		/* pool state */
+	spa_history_kstat_t	iostats;
 } spa_stats_t;
 
 typedef enum txg_state {
@@ -905,6 +950,22 @@ typedef struct txg_stat {
 	uint64_t		ndirty;
 } txg_stat_t;
 
+/* Assorted pool IO kstats */
+typedef struct spa_iostats {
+	kstat_named_t	trim_extents_written;
+	kstat_named_t	trim_bytes_written;
+	kstat_named_t	trim_extents_skipped;
+	kstat_named_t	trim_bytes_skipped;
+	kstat_named_t	trim_extents_failed;
+	kstat_named_t	trim_bytes_failed;
+	kstat_named_t	autotrim_extents_written;
+	kstat_named_t	autotrim_bytes_written;
+	kstat_named_t	autotrim_extents_skipped;
+	kstat_named_t	autotrim_bytes_skipped;
+	kstat_named_t	autotrim_extents_failed;
+	kstat_named_t	autotrim_bytes_failed;
+} spa_iostats_t;
+
 extern void spa_stats_init(spa_t *spa);
 extern void spa_stats_destroy(spa_t *spa);
 extern void spa_read_history_add(spa_t *spa, const zbookmark_phys_t *zb,
@@ -922,6 +983,18 @@ extern int spa_mmp_history_set(spa_t *spa, uint64_t mmp_kstat_id, int io_error,
 extern void spa_mmp_history_add(spa_t *spa, uint64_t txg, uint64_t timestamp,
     uint64_t mmp_delay, vdev_t *vd, int label, uint64_t mmp_kstat_id,
     int error);
+extern void spa_iostats_trim_add(spa_t *spa, trim_type_t type,
+    uint64_t extents_written, uint64_t bytes_written,
+    uint64_t extents_skipped, uint64_t bytes_skipped,
+    uint64_t extents_failed, uint64_t bytes_failed);
+extern void spa_import_progress_add(spa_t *spa);
+extern void spa_import_progress_remove(uint64_t spa_guid);
+extern int spa_import_progress_set_mmp_check(uint64_t pool_guid,
+    uint64_t mmp_sec_remaining);
+extern int spa_import_progress_set_max_txg(uint64_t pool_guid,
+    uint64_t max_txg);
+extern int spa_import_progress_set_state(uint64_t pool_guid,
+    spa_load_state_t spa_load_state);
 
 /* Pool configuration locks */
 extern int spa_config_tryenter(spa_t *spa, int locks, void *tag, krw_t rw);
@@ -1005,6 +1078,7 @@ extern objset_t *spa_meta_objset(spa_t *spa);
 extern uint64_t spa_deadman_synctime(spa_t *spa);
 extern uint64_t spa_deadman_ziotime(spa_t *spa);
 extern uint64_t spa_dirty_data(spa_t *spa);
+extern spa_autotrim_t spa_get_autotrim(spa_t *spa);
 
 /* Miscellaneous support routines */
 extern void spa_load_failed(spa_t *spa, const char *fmt, ...);

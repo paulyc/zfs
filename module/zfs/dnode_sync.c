@@ -386,8 +386,17 @@ dnode_sync_free_range_impl(dnode_t *dn, uint64_t blkid, uint64_t nblks,
 
 	/*
 	 * Do not truncate the maxblkid if we are performing a raw
-	 * receive. The raw receive sets the mablkid manually and
-	 * must not be overriden.
+	 * receive. The raw receive sets the maxblkid manually and
+	 * must not be overridden. Usually, the last DRR_FREE record
+	 * will be at the maxblkid, because the source system sets
+	 * the maxblkid when truncating. However, if the last block
+	 * was freed by overwriting with zeros and being compressed
+	 * away to a hole, the source system will generate a DRR_FREE
+	 * record while leaving the maxblkid after the end of that
+	 * record. In this case we need to leave the maxblkid as
+	 * indicated in the DRR_OBJECT record, so that it matches the
+	 * source system, ensuring that the cryptographic hashes will
+	 * match.
 	 */
 	if (trunc && !dn->dn_objset->os_raw_receive) {
 		ASSERTV(uint64_t off);
@@ -765,11 +774,13 @@ dnode_sync(dnode_t *dn, dmu_tx_t *tx)
 
 	/*
 	 * This must be done after dnode_sync_free_range()
-	 * and dnode_increase_indirection().
+	 * and dnode_increase_indirection(). See dnode_new_blkid()
+	 * for an explanation of the high bit being set.
 	 */
 	if (dn->dn_next_maxblkid[txgoff]) {
 		mutex_enter(&dn->dn_mtx);
-		dnp->dn_maxblkid = dn->dn_next_maxblkid[txgoff];
+		dnp->dn_maxblkid =
+		    dn->dn_next_maxblkid[txgoff] & ~DMU_NEXT_MAXBLKID_SET;
 		dn->dn_next_maxblkid[txgoff] = 0;
 		mutex_exit(&dn->dn_mtx);
 	}

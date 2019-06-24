@@ -23,13 +23,14 @@
  * Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  * Rewritten for Linux by Brian Behlendorf <behlendorf1@llnl.gov>.
  * LLNL-CODE-403049.
- * Copyright (c) 2012, 2018 by Delphix. All rights reserved.
+ * Copyright (c) 2012, 2019 by Delphix. All rights reserved.
  */
 
 #include <sys/zfs_context.h>
 #include <sys/spa_impl.h>
 #include <sys/vdev_disk.h>
 #include <sys/vdev_impl.h>
+#include <sys/vdev_trim.h>
 #include <sys/abd.h>
 #include <sys/fs/zfs.h>
 #include <sys/zio.h>
@@ -55,7 +56,7 @@ typedef struct dio_request {
 } dio_request_t;
 
 
-#ifdef HAVE_OPEN_BDEV_EXCLUSIVE
+#if defined(HAVE_OPEN_BDEV_EXCLUSIVE) || defined(HAVE_BLKDEV_GET_BY_PATH)
 static fmode_t
 vdev_bdev_mode(int smode)
 {
@@ -223,7 +224,7 @@ vdev_elevator_switch(vdev_t *v, char *elevator)
 	strfree(argv[2]);
 #endif /* HAVE_ELEVATOR_CHANGE */
 	if (error) {
-		zfs_dbgmsg("Unable to set \"%s\" scheduler for %s (%s): %d\n",
+		zfs_dbgmsg("Unable to set \"%s\" scheduler for %s (%s): %d",
 		    elevator, v->vdev_path, device, error);
 	}
 }
@@ -322,7 +323,7 @@ vdev_disk_open(vdev_t *v, uint64_t *psize, uint64_t *max_psize,
 
 	if (IS_ERR(bdev)) {
 		int error = -PTR_ERR(bdev);
-		vdev_dbgmsg(v, "open error=%d count=%d\n", error, count);
+		vdev_dbgmsg(v, "open error=%d count=%d", error, count);
 		vd->vd_bdev = NULL;
 		v->vdev_tsd = vd;
 		rw_exit(&vd->vd_lock);
@@ -333,14 +334,22 @@ vdev_disk_open(vdev_t *v, uint64_t *psize, uint64_t *max_psize,
 		rw_exit(&vd->vd_lock);
 	}
 
+	struct request_queue *q = bdev_get_queue(vd->vd_bdev);
+
 	/*  Determine the physical block size */
 	block_size = vdev_bdev_block_size(vd->vd_bdev);
 
 	/* Clear the nowritecache bit, causes vdev_reopen() to try again. */
 	v->vdev_nowritecache = B_FALSE;
 
+	/* Set when device reports it supports TRIM. */
+	v->vdev_has_trim = !!blk_queue_discard(q);
+
+	/* Set when device reports it supports secure TRIM. */
+	v->vdev_has_securetrim = !!blk_queue_discard_secure(q);
+
 	/* Inform the ZIO pipeline that we are non-rotational */
-	v->vdev_nonrot = blk_queue_nonrot(bdev_get_queue(vd->vd_bdev));
+	v->vdev_nonrot = blk_queue_nonrot(q);
 
 	/* Physical volume size in bytes for the partition */
 	*psize = bdev_capacity(vd->vd_bdev);
@@ -534,7 +543,6 @@ vdev_bio_associate_blkg(struct bio *bio)
 	struct request_queue *q = bio->bi_disk->queue;
 
 	ASSERT3P(q, !=, NULL);
-	ASSERT3P(q->root_blkg, !=, NULL);
 	ASSERT3P(bio->bi_blkg, ==, NULL);
 
 	if (blkg_tryget(q->root_blkg))
@@ -728,6 +736,7 @@ vdev_disk_io_start(zio_t *zio)
 {
 	vdev_t *v = zio->io_vd;
 	vdev_disk_t *vd = v->vdev_tsd;
+	unsigned long trim_flags = 0;
 	int rw, flags, error;
 
 	/*
@@ -812,6 +821,19 @@ vdev_disk_io_start(zio_t *zio)
 		flags = 0;
 #endif
 		break;
+
+	case ZIO_TYPE_TRIM:
+#if defined(BLKDEV_DISCARD_SECURE)
+		if (zio->io_trim_flags & ZIO_TRIM_SECURE)
+			trim_flags |= BLKDEV_DISCARD_SECURE;
+#endif
+		zio->io_error = -blkdev_issue_discard(vd->vd_bdev,
+		    zio->io_offset >> 9, zio->io_size >> 9, GFP_NOFS,
+		    trim_flags);
+
+		rw_exit(&vd->vd_lock);
+		zio_interrupt(zio);
+		return;
 
 	default:
 		rw_exit(&vd->vd_lock);
@@ -913,19 +935,19 @@ param_set_vdev_scheduler(const char *val, zfs_kernel_param_t *kp)
 }
 
 vdev_ops_t vdev_disk_ops = {
-	vdev_disk_open,
-	vdev_disk_close,
-	vdev_default_asize,
-	vdev_disk_io_start,
-	vdev_disk_io_done,
-	NULL,
-	NULL,
-	vdev_disk_hold,
-	vdev_disk_rele,
-	NULL,
-	vdev_default_xlate,
-	VDEV_TYPE_DISK,		/* name of this vdev type */
-	B_TRUE			/* leaf vdev */
+	.vdev_op_open = vdev_disk_open,
+	.vdev_op_close = vdev_disk_close,
+	.vdev_op_asize = vdev_default_asize,
+	.vdev_op_io_start = vdev_disk_io_start,
+	.vdev_op_io_done = vdev_disk_io_done,
+	.vdev_op_state_change = NULL,
+	.vdev_op_need_resilver = NULL,
+	.vdev_op_hold = vdev_disk_hold,
+	.vdev_op_rele = vdev_disk_rele,
+	.vdev_op_remap = NULL,
+	.vdev_op_xlate = vdev_default_xlate,
+	.vdev_op_type = VDEV_TYPE_DISK,		/* name of this vdev type */
+	.vdev_op_leaf = B_TRUE			/* leaf vdev */
 };
 
 module_param_call(zfs_vdev_scheduler, param_set_vdev_scheduler,

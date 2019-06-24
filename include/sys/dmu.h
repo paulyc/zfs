@@ -420,7 +420,8 @@ int dmu_object_reclaim(objset_t *os, uint64_t object, dmu_object_type_t ot,
     int blocksize, dmu_object_type_t bonustype, int bonuslen, dmu_tx_t *txp);
 int dmu_object_reclaim_dnsize(objset_t *os, uint64_t object,
     dmu_object_type_t ot, int blocksize, dmu_object_type_t bonustype,
-    int bonuslen, int dnodesize, dmu_tx_t *txp);
+    int bonuslen, int dnodesize, boolean_t keep_spill, dmu_tx_t *tx);
+int dmu_object_rm_spill(objset_t *os, uint64_t object, dmu_tx_t *tx);
 
 /*
  * Free an object from this objset.
@@ -477,7 +478,8 @@ int dmu_object_set_blocksize(objset_t *os, uint64_t object, uint64_t size,
 
 /*
  * Manually set the maxblkid on a dnode. This will adjust nlevels accordingly
- * to accommodate the change.
+ * to accommodate the change. When calling this function, the caller must
+ * ensure that the object's nlevels can sufficiently support the new maxblkid.
  */
 int dmu_object_set_maxblkid(objset_t *os, uint64_t object, uint64_t maxblkid,
     dmu_tx_t *tx);
@@ -502,6 +504,8 @@ int dmu_object_remap_indirects(objset_t *os, uint64_t object, uint64_t txg);
 void dmu_write_embedded(objset_t *os, uint64_t object, uint64_t offset,
     void *data, uint8_t etype, uint8_t comp, int uncompressed_size,
     int compressed_size, int byteorder, dmu_tx_t *tx);
+void dmu_redact(objset_t *os, uint64_t object, uint64_t offset, uint64_t size,
+    dmu_tx_t *tx);
 
 /*
  * Decide how to write a block: checksum, compression, number of copies, etc.
@@ -949,6 +953,7 @@ typedef struct dmu_objset_stats {
 	dmu_objset_type_t dds_type;
 	uint8_t dds_is_snapshot;
 	uint8_t dds_inconsistent;
+	uint8_t dds_redacted;
 	char dds_origin[ZFS_MAX_DATASET_NAME_LEN];
 } dmu_objset_stats_t;
 

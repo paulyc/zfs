@@ -52,6 +52,7 @@ SUBDIRS = \
 	projectquota \
 	quota \
 	raidz \
+	redacted_send \
 	redundancy \
 	refquota \
 	refreserv \
@@ -68,6 +69,7 @@ SUBDIRS = \
 	sparse \
 	threadsappend \
 	tmpfile \
+	trim \
 	truncate \
 	upgrade \
 	user_namespace \

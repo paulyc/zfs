@@ -15,6 +15,7 @@
 
 /*
  * Copyright (c) 2014, 2017 by Delphix. All rights reserved.
+ * Copyright (c) 2019, loli10K <ezomori.nozomu@gmail.com>. All rights reserved.
  */
 
 #include <sys/zfs_context.h>
@@ -902,7 +903,7 @@ vdev_obsolete_sm_object(vdev_t *vd, uint64_t *sm_obj)
 	}
 
 	int error = zap_lookup(vd->vdev_spa->spa_meta_objset, vd->vdev_top_zap,
-	    VDEV_TOP_ZAP_INDIRECT_OBSOLETE_SM, sizeof (sm_obj), 1, sm_obj);
+	    VDEV_TOP_ZAP_INDIRECT_OBSOLETE_SM, sizeof (uint64_t), 1, sm_obj);
 	if (error == ENOENT) {
 		*sm_obj = 0;
 		error = 0;
@@ -1841,19 +1842,19 @@ vdev_indirect_io_done(zio_t *zio)
 }
 
 vdev_ops_t vdev_indirect_ops = {
-	vdev_indirect_open,
-	vdev_indirect_close,
-	vdev_default_asize,
-	vdev_indirect_io_start,
-	vdev_indirect_io_done,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	vdev_indirect_remap,
-	NULL,
-	VDEV_TYPE_INDIRECT,	/* name of this vdev type */
-	B_FALSE			/* leaf vdev */
+	.vdev_op_open = vdev_indirect_open,
+	.vdev_op_close = vdev_indirect_close,
+	.vdev_op_asize = vdev_default_asize,
+	.vdev_op_io_start = vdev_indirect_io_start,
+	.vdev_op_io_done = vdev_indirect_io_done,
+	.vdev_op_state_change = NULL,
+	.vdev_op_need_resilver = NULL,
+	.vdev_op_hold = NULL,
+	.vdev_op_rele = NULL,
+	.vdev_op_remap = vdev_indirect_remap,
+	.vdev_op_xlate = NULL,
+	.vdev_op_type = VDEV_TYPE_INDIRECT,	/* name of this vdev type */
+	.vdev_op_leaf = B_FALSE			/* leaf vdev */
 };
 
 #if defined(_KERNEL)

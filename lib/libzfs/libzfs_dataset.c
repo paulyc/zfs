@@ -22,7 +22,7 @@
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2018, Joyent, Inc. All rights reserved.
- * Copyright (c) 2011, 2017 by Delphix. All rights reserved.
+ * Copyright (c) 2011, 2018 by Delphix. All rights reserved.
  * Copyright (c) 2012 DEY Storage Systems, Inc.  All rights reserved.
  * Copyright (c) 2012 Pawel Jakub Dawidek <pawel@dawidek.net>.
  * Copyright (c) 2013 Martin Matuska. All rights reserved.
@@ -30,7 +30,8 @@
  * Copyright 2017 Nexenta Systems, Inc.
  * Copyright 2016 Igor Kozhukhov <ikozhukhov@gmail.com>
  * Copyright 2017-2018 RackTop Systems.
- * Copyright (c) 2018 Datto Inc.
+ * Copyright (c) 2019 Datto Inc.
+ * Copyright (c) 2019, loli10K <ezomori.nozomu@gmail.com>
  */
 
 #include <ctype.h>
@@ -194,6 +195,16 @@ zfs_validate_name(libzfs_handle_t *hdl, const char *path, int type,
 			case NAME_ERR_DISKLIKE:
 				zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 				    "reserved disk name"));
+				break;
+
+			case NAME_ERR_SELF_REF:
+				zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
+				    "self reference, '.' is found in name"));
+				break;
+
+			case NAME_ERR_PARENT_REF:
+				zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
+				    "parent reference, '..' is found in name"));
 				break;
 
 			default:
@@ -585,7 +596,6 @@ zfs_bookmark_exists(const char *path)
 	char *pound;
 	int err;
 	boolean_t rv;
-
 
 	(void) strlcpy(fsname, path, sizeof (fsname));
 	pound = strchr(fsname, '#');
@@ -2397,6 +2407,10 @@ get_numeric_property(zfs_handle_t *zhp, zfs_prop_t prop, zprop_source_t *src,
 		*val = zhp->zfs_dmustats.dds_inconsistent;
 		break;
 
+	case ZFS_PROP_REDACTED:
+		*val = zhp->zfs_dmustats.dds_redacted;
+		break;
+
 	default:
 		switch (zfs_prop_get_type(prop)) {
 		case PROP_TYPE_NUMBER:
@@ -2609,6 +2623,37 @@ zfs_get_clones_nvl(zfs_handle_t *zhp)
 	return (value);
 }
 
+static int
+get_rsnaps_string(zfs_handle_t *zhp, char *propbuf, size_t proplen)
+{
+	nvlist_t *value;
+	uint64_t *snaps;
+	uint_t nsnaps;
+
+	if (nvlist_lookup_nvlist(zhp->zfs_props,
+	    zfs_prop_to_name(ZFS_PROP_REDACT_SNAPS), &value) != 0)
+		return (-1);
+	if (nvlist_lookup_uint64_array(value, ZPROP_VALUE, &snaps,
+	    &nsnaps) != 0)
+		return (-1);
+	if (nsnaps == 0) {
+		/* There's no redaction snapshots; pass a special value back */
+		(void) snprintf(propbuf, proplen, "none");
+		return (0);
+	}
+	propbuf[0] = '\0';
+	for (int i = 0; i < nsnaps; i++) {
+		char buf[128];
+		if (propbuf[0] != '\0')
+			(void) strlcat(propbuf, ",", proplen);
+		(void) snprintf(buf, sizeof (buf), "%llu",
+		    (u_longlong_t)snaps[i]);
+		(void) strlcat(propbuf, buf, proplen);
+	}
+
+	return (0);
+}
+
 /*
  * Accepts a property and value and checks that the value
  * matches the one found by the channel program. If they are
@@ -2803,6 +2848,11 @@ zfs_prop_get(zfs_handle_t *zhp, zfs_prop_t prop, char *propbuf, size_t proplen,
 		zcp_check(zhp, prop, 0, str);
 		break;
 
+	case ZFS_PROP_REDACT_SNAPS:
+		if (get_rsnaps_string(zhp, propbuf, proplen) != 0)
+			return (-1);
+		break;
+
 	case ZFS_PROP_CLONES:
 		if (get_clones_string(zhp, propbuf, proplen) != 0)
 			return (-1);
@@ -2969,8 +3019,10 @@ zfs_prop_get(zfs_handle_t *zhp, zfs_prop_t prop, char *propbuf, size_t proplen,
 
 	case ZFS_PROP_GUID:
 	case ZFS_PROP_CREATETXG:
+	case ZFS_PROP_OBJSETID:
 		/*
-		 * GUIDs are stored as numbers, but they are identifiers.
+		 * These properties are stored as numbers, but they are
+		 * identifiers.
 		 * We don't want them to be pretty printed, because pretty
 		 * printing mangles the ID into a truncated and useless value.
 		 */
@@ -3320,6 +3372,9 @@ zfs_prop_get_userquota(zfs_handle_t *zhp, const char *propname,
 	return (0);
 }
 
+/*
+ * propname must start with "written@" or "written#".
+ */
 int
 zfs_prop_get_written_int(zfs_handle_t *zhp, const char *propname,
     uint64_t *propvalue)
@@ -3330,8 +3385,10 @@ zfs_prop_get_written_int(zfs_handle_t *zhp, const char *propname,
 
 	(void) strlcpy(zc.zc_name, zhp->zfs_name, sizeof (zc.zc_name));
 
-	snapname = strchr(propname, '@') + 1;
-	if (strchr(snapname, '@')) {
+	assert(zfs_prop_written(propname));
+	snapname = propname + strlen("written@");
+	if (strchr(snapname, '@') != NULL || strchr(snapname, '#') != NULL) {
+		/* full snapshot or bookmark name specified */
 		(void) strlcpy(zc.zc_value, snapname, sizeof (zc.zc_value));
 	} else {
 		/* snapname is the short name, append it to zhp's fsname */
@@ -3342,8 +3399,7 @@ zfs_prop_get_written_int(zfs_handle_t *zhp, const char *propname,
 		cp = strchr(zc.zc_value, '@');
 		if (cp != NULL)
 			*cp = '\0';
-		(void) strlcat(zc.zc_value, "@", sizeof (zc.zc_value));
-		(void) strlcat(zc.zc_value, snapname, sizeof (zc.zc_value));
+		(void) strlcat(zc.zc_value, snapname - 1, sizeof (zc.zc_value));
 	}
 
 	err = ioctl(zhp->zfs_hdl->libzfs_fd, ZFS_IOC_SPACE_WRITTEN, &zc);
@@ -4367,6 +4423,7 @@ zfs_rollback(zfs_handle_t *zhp, zfs_handle_t *snap, boolean_t force)
 	boolean_t restore_resv = 0;
 	uint64_t old_volsize = 0, new_volsize;
 	zfs_prop_t resv_prop = { 0 };
+	uint64_t min_txg = 0;
 
 	assert(zhp->zfs_type == ZFS_TYPE_FILESYSTEM ||
 	    zhp->zfs_type == ZFS_TYPE_VOLUME);
@@ -4377,7 +4434,13 @@ zfs_rollback(zfs_handle_t *zhp, zfs_handle_t *snap, boolean_t force)
 	cb.cb_force = force;
 	cb.cb_target = snap->zfs_name;
 	cb.cb_create = zfs_prop_get_int(snap, ZFS_PROP_CREATETXG);
-	(void) zfs_iter_snapshots(zhp, B_FALSE, rollback_destroy, &cb);
+
+	if (cb.cb_create > 0)
+		min_txg = cb.cb_create;
+
+	(void) zfs_iter_snapshots(zhp, B_FALSE, rollback_destroy, &cb,
+	    min_txg, 0);
+
 	(void) zfs_iter_bookmarks(zhp, rollback_destroy, &cb);
 
 	if (cb.cb_error)
@@ -4460,8 +4523,6 @@ zfs_rename(zfs_handle_t *zhp, const char *target, boolean_t recursive,
 	zfs_cmd_t zc = {"\0"};
 	char *delim;
 	prop_changelist_t *cl = NULL;
-	zfs_handle_t *zhrp = NULL;
-	char *parentname = NULL;
 	char parent[ZFS_MAX_DATASET_NAME_LEN];
 	libzfs_handle_t *hdl = zhp->zfs_hdl;
 	char errbuf[1024];
@@ -4556,7 +4617,8 @@ zfs_rename(zfs_handle_t *zhp, const char *target, boolean_t recursive,
 	}
 
 	if (recursive) {
-		parentname = zfs_strdup(zhp->zfs_hdl, zhp->zfs_name);
+		zfs_handle_t *zhrp;
+		char *parentname = zfs_strdup(zhp->zfs_hdl, zhp->zfs_name);
 		if (parentname == NULL) {
 			ret = -1;
 			goto error;
@@ -4564,10 +4626,12 @@ zfs_rename(zfs_handle_t *zhp, const char *target, boolean_t recursive,
 		delim = strchr(parentname, '@');
 		*delim = '\0';
 		zhrp = zfs_open(zhp->zfs_hdl, parentname, ZFS_TYPE_DATASET);
+		free(parentname);
 		if (zhrp == NULL) {
 			ret = -1;
 			goto error;
 		}
+		zfs_close(zhrp);
 	} else if (zhp->zfs_type != ZFS_TYPE_SNAPSHOT) {
 		if ((cl = changelist_gather(zhp, ZFS_PROP_NAME,
 		    CL_GATHER_ITER_MOUNTED,
@@ -4611,16 +4675,9 @@ zfs_rename(zfs_handle_t *zhp, const char *target, boolean_t recursive,
 			    "with the new name"));
 			(void) zfs_error(hdl, EZFS_EXISTS, errbuf);
 		} else if (errno == EACCES) {
-			if (zfs_prop_get_int(zhp, ZFS_PROP_ENCRYPTION) ==
-			    ZIO_CRYPT_OFF) {
-				zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
-				    "cannot rename an unencrypted dataset to "
-				    "be a decendent of an encrypted one"));
-			} else {
-				zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
-				    "cannot move encryption child outside of "
-				    "its encryption root"));
-			}
+			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
+			    "cannot move encrypted child outside of "
+			    "its encryption root"));
 			(void) zfs_error(hdl, EZFS_CRYPTOFAILED, errbuf);
 		} else {
 			(void) zfs_standard_error(zhp->zfs_hdl, errno, errbuf);
@@ -4640,12 +4697,6 @@ zfs_rename(zfs_handle_t *zhp, const char *target, boolean_t recursive,
 	}
 
 error:
-	if (parentname != NULL) {
-		free(parentname);
-	}
-	if (zhrp != NULL) {
-		zfs_close(zhrp);
-	}
 	if (cl != NULL) {
 		changelist_free(cl);
 	}

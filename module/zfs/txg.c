@@ -242,11 +242,17 @@ txg_thread_wait(tx_state_t *tx, callb_cpr_t *cpr, kcondvar_t *cv, clock_t time)
 {
 	CALLB_CPR_SAFE_BEGIN(cpr);
 
-	if (time)
+	/*
+	 * cv_wait_sig() is used instead of cv_wait() in order to prevent
+	 * this process from incorrectly contributing to the system load
+	 * average when idle.
+	 */
+	if (time) {
 		(void) cv_timedwait_sig(cv, &tx->tx_sync_lock,
 		    ddi_get_lbolt() + time);
-	else
+	} else {
 		cv_wait_sig(cv, &tx->tx_sync_lock);
+	}
 
 	CALLB_CPR_SAFE_END(cpr, &tx->tx_sync_lock);
 }
@@ -669,8 +675,8 @@ txg_delay(dsl_pool_t *dp, uint64_t txg, hrtime_t delay, hrtime_t resolution)
 	mutex_exit(&tx->tx_sync_lock);
 }
 
-void
-txg_wait_synced(dsl_pool_t *dp, uint64_t txg)
+static boolean_t
+txg_wait_synced_impl(dsl_pool_t *dp, uint64_t txg, boolean_t wait_sig)
 {
 	tx_state_t *tx = &dp->dp_tx;
 
@@ -686,16 +692,50 @@ txg_wait_synced(dsl_pool_t *dp, uint64_t txg)
 	    txg, tx->tx_quiesce_txg_waiting, tx->tx_sync_txg_waiting);
 	while (tx->tx_synced_txg < txg) {
 		dprintf("broadcasting sync more "
-		    "tx_synced=%llu waiting=%llu dp=%p\n",
+		    "tx_synced=%llu waiting=%llu dp=%px\n",
 		    tx->tx_synced_txg, tx->tx_sync_txg_waiting, dp);
 		cv_broadcast(&tx->tx_sync_more_cv);
-		cv_wait(&tx->tx_sync_done_cv, &tx->tx_sync_lock);
+		if (wait_sig) {
+			/*
+			 * Condition wait here but stop if the thread receives a
+			 * signal. The caller may call txg_wait_synced*() again
+			 * to resume waiting for this txg.
+			 */
+			if (cv_wait_io_sig(&tx->tx_sync_done_cv,
+			    &tx->tx_sync_lock) == 0) {
+				mutex_exit(&tx->tx_sync_lock);
+				return (B_TRUE);
+			}
+		} else {
+			cv_wait_io(&tx->tx_sync_done_cv, &tx->tx_sync_lock);
+		}
 	}
 	mutex_exit(&tx->tx_sync_lock);
+	return (B_FALSE);
 }
 
 void
-txg_wait_open(dsl_pool_t *dp, uint64_t txg)
+txg_wait_synced(dsl_pool_t *dp, uint64_t txg)
+{
+	VERIFY0(txg_wait_synced_impl(dp, txg, B_FALSE));
+}
+
+/*
+ * Similar to a txg_wait_synced but it can be interrupted from a signal.
+ * Returns B_TRUE if the thread was signaled while waiting.
+ */
+boolean_t
+txg_wait_synced_sig(dsl_pool_t *dp, uint64_t txg)
+{
+	return (txg_wait_synced_impl(dp, txg, B_TRUE));
+}
+
+/*
+ * Wait for the specified open transaction group.  Set should_quiesce
+ * when the current open txg should be quiesced immediately.
+ */
+void
+txg_wait_open(dsl_pool_t *dp, uint64_t txg, boolean_t should_quiesce)
 {
 	tx_state_t *tx = &dp->dp_tx;
 
@@ -705,13 +745,23 @@ txg_wait_open(dsl_pool_t *dp, uint64_t txg)
 	ASSERT3U(tx->tx_threads, ==, 2);
 	if (txg == 0)
 		txg = tx->tx_open_txg + 1;
-	if (tx->tx_quiesce_txg_waiting < txg)
+	if (tx->tx_quiesce_txg_waiting < txg && should_quiesce)
 		tx->tx_quiesce_txg_waiting = txg;
 	dprintf("txg=%llu quiesce_txg=%llu sync_txg=%llu\n",
 	    txg, tx->tx_quiesce_txg_waiting, tx->tx_sync_txg_waiting);
 	while (tx->tx_open_txg < txg) {
 		cv_broadcast(&tx->tx_quiesce_more_cv);
-		cv_wait(&tx->tx_quiesce_done_cv, &tx->tx_sync_lock);
+		/*
+		 * Callers setting should_quiesce will use cv_wait_io() and
+		 * be accounted for as iowait time.  Otherwise, the caller is
+		 * understood to be idle and cv_wait_sig() is used to prevent
+		 * incorrectly inflating the system load average.
+		 */
+		if (should_quiesce == B_TRUE) {
+			cv_wait_io(&tx->tx_quiesce_done_cv, &tx->tx_sync_lock);
+		} else {
+			cv_wait_sig(&tx->tx_quiesce_done_cv, &tx->tx_sync_lock);
+		}
 	}
 	mutex_exit(&tx->tx_sync_lock);
 }

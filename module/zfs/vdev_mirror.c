@@ -254,9 +254,32 @@ vdev_mirror_map_init(zio_t *zio)
 	if (vd == NULL) {
 		dva_t *dva = zio->io_bp->blk_dva;
 		spa_t *spa = zio->io_spa;
+		dsl_scan_t *scn = spa->spa_dsl_pool->dp_scan;
 		dva_t dva_copy[SPA_DVAS_PER_BP];
 
-		c = BP_GET_NDVAS(zio->io_bp);
+		/*
+		 * The sequential scrub code sorts and issues all DVAs
+		 * of a bp separately. Each of these IOs includes all
+		 * original DVA copies so that repairs can be performed
+		 * in the event of an error, but we only actually want
+		 * to check the first DVA since the others will be
+		 * checked by their respective sorted IOs. Only if we
+		 * hit an error will we try all DVAs upon retrying.
+		 *
+		 * Note: This check is safe even if the user switches
+		 * from a legacy scrub to a sequential one in the middle
+		 * of processing, since scn_is_sorted isn't updated until
+		 * all outstanding IOs from the previous scrub pass
+		 * complete.
+		 */
+		if ((zio->io_flags & ZIO_FLAG_SCRUB) &&
+		    !(zio->io_flags & ZIO_FLAG_IO_RETRY) &&
+		    dsl_scan_scrubbing(spa->spa_dsl_pool) &&
+		    scn->scn_is_sorted) {
+			c = 1;
+		} else {
+			c = BP_GET_NDVAS(zio->io_bp);
+		}
 
 		/*
 		 * If we do not trust the pool config, some DVAs might be
@@ -763,51 +786,51 @@ vdev_mirror_state_change(vdev_t *vd, int faulted, int degraded)
 }
 
 vdev_ops_t vdev_mirror_ops = {
-	vdev_mirror_open,
-	vdev_mirror_close,
-	vdev_default_asize,
-	vdev_mirror_io_start,
-	vdev_mirror_io_done,
-	vdev_mirror_state_change,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	vdev_default_xlate,
-	VDEV_TYPE_MIRROR,	/* name of this vdev type */
-	B_FALSE			/* not a leaf vdev */
+	.vdev_op_open = vdev_mirror_open,
+	.vdev_op_close = vdev_mirror_close,
+	.vdev_op_asize = vdev_default_asize,
+	.vdev_op_io_start = vdev_mirror_io_start,
+	.vdev_op_io_done = vdev_mirror_io_done,
+	.vdev_op_state_change = vdev_mirror_state_change,
+	.vdev_op_need_resilver = NULL,
+	.vdev_op_hold = NULL,
+	.vdev_op_rele = NULL,
+	.vdev_op_remap = NULL,
+	.vdev_op_xlate = vdev_default_xlate,
+	.vdev_op_type = VDEV_TYPE_MIRROR,	/* name of this vdev type */
+	.vdev_op_leaf = B_FALSE			/* not a leaf vdev */
 };
 
 vdev_ops_t vdev_replacing_ops = {
-	vdev_mirror_open,
-	vdev_mirror_close,
-	vdev_default_asize,
-	vdev_mirror_io_start,
-	vdev_mirror_io_done,
-	vdev_mirror_state_change,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	vdev_default_xlate,
-	VDEV_TYPE_REPLACING,	/* name of this vdev type */
-	B_FALSE			/* not a leaf vdev */
+	.vdev_op_open = vdev_mirror_open,
+	.vdev_op_close = vdev_mirror_close,
+	.vdev_op_asize = vdev_default_asize,
+	.vdev_op_io_start = vdev_mirror_io_start,
+	.vdev_op_io_done = vdev_mirror_io_done,
+	.vdev_op_state_change = vdev_mirror_state_change,
+	.vdev_op_need_resilver = NULL,
+	.vdev_op_hold = NULL,
+	.vdev_op_rele = NULL,
+	.vdev_op_remap = NULL,
+	.vdev_op_xlate = vdev_default_xlate,
+	.vdev_op_type = VDEV_TYPE_REPLACING,	/* name of this vdev type */
+	.vdev_op_leaf = B_FALSE			/* not a leaf vdev */
 };
 
 vdev_ops_t vdev_spare_ops = {
-	vdev_mirror_open,
-	vdev_mirror_close,
-	vdev_default_asize,
-	vdev_mirror_io_start,
-	vdev_mirror_io_done,
-	vdev_mirror_state_change,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	vdev_default_xlate,
-	VDEV_TYPE_SPARE,	/* name of this vdev type */
-	B_FALSE			/* not a leaf vdev */
+	.vdev_op_open = vdev_mirror_open,
+	.vdev_op_close = vdev_mirror_close,
+	.vdev_op_asize = vdev_default_asize,
+	.vdev_op_io_start = vdev_mirror_io_start,
+	.vdev_op_io_done = vdev_mirror_io_done,
+	.vdev_op_state_change = vdev_mirror_state_change,
+	.vdev_op_need_resilver = NULL,
+	.vdev_op_hold = NULL,
+	.vdev_op_rele = NULL,
+	.vdev_op_remap = NULL,
+	.vdev_op_xlate = vdev_default_xlate,
+	.vdev_op_type = VDEV_TYPE_SPARE,	/* name of this vdev type */
+	.vdev_op_leaf = B_FALSE			/* not a leaf vdev */
 };
 
 #if defined(_KERNEL)

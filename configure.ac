@@ -120,6 +120,7 @@ AC_CONFIG_FILES([
 	cmd/dbufstat/Makefile
 	cmd/arc_summary/Makefile
 	cmd/zed/Makefile
+	cmd/zed/zed.d/Makefile
 	cmd/raidz_test/Makefile
 	cmd/zgenhostid/Makefile
 	contrib/Makefile
@@ -171,6 +172,7 @@ AC_CONFIG_FILES([
 	tests/zfs-tests/cmd/file_check/Makefile
 	tests/zfs-tests/cmd/file_trunc/Makefile
 	tests/zfs-tests/cmd/file_write/Makefile
+	tests/zfs-tests/cmd/get_diff/Makefile
 	tests/zfs-tests/cmd/largest_file/Makefile
 	tests/zfs-tests/cmd/libzfs_input_check/Makefile
 	tests/zfs-tests/cmd/mkbusy/Makefile
@@ -188,6 +190,7 @@ AC_CONFIG_FILES([
 	tests/zfs-tests/cmd/rm_lnkcnt_zero_file/Makefile
 	tests/zfs-tests/cmd/threadsappend/Makefile
 	tests/zfs-tests/cmd/xattrtest/Makefile
+	tests/zfs-tests/cmd/stride_dd/Makefile
 	tests/zfs-tests/include/Makefile
 	tests/zfs-tests/tests/Makefile
 	tests/zfs-tests/tests/functional/Makefile
@@ -263,6 +266,7 @@ AC_CONFIG_FILES([
 	tests/zfs-tests/tests/functional/cli_root/zpool_split/Makefile
 	tests/zfs-tests/tests/functional/cli_root/zpool_status/Makefile
 	tests/zfs-tests/tests/functional/cli_root/zpool_sync/Makefile
+	tests/zfs-tests/tests/functional/cli_root/zpool_trim/Makefile
 	tests/zfs-tests/tests/functional/cli_root/zpool_upgrade/Makefile
 	tests/zfs-tests/tests/functional/cli_root/zpool_upgrade/blockfiles/Makefile
 	tests/zfs-tests/tests/functional/cli_user/Makefile
@@ -311,6 +315,7 @@ AC_CONFIG_FILES([
 	tests/zfs-tests/tests/functional/pyzfs/Makefile
 	tests/zfs-tests/tests/functional/quota/Makefile
 	tests/zfs-tests/tests/functional/raidz/Makefile
+	tests/zfs-tests/tests/functional/redacted_send/Makefile
 	tests/zfs-tests/tests/functional/redundancy/Makefile
 	tests/zfs-tests/tests/functional/refquota/Makefile
 	tests/zfs-tests/tests/functional/refreserv/Makefile
@@ -328,6 +333,7 @@ AC_CONFIG_FILES([
 	tests/zfs-tests/tests/functional/alloc_class/Makefile
 	tests/zfs-tests/tests/functional/threadsappend/Makefile
 	tests/zfs-tests/tests/functional/tmpfile/Makefile
+	tests/zfs-tests/tests/functional/trim/Makefile
 	tests/zfs-tests/tests/functional/truncate/Makefile
 	tests/zfs-tests/tests/functional/user_namespace/Makefile
 	tests/zfs-tests/tests/functional/userquota/Makefile

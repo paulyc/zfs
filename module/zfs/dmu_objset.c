@@ -412,6 +412,7 @@ dmu_objset_open_impl(spa_t *spa, dsl_dataset_t *ds, blkptr_t *bp,
 	int i, err;
 
 	ASSERT(ds == NULL || MUTEX_HELD(&ds->ds_opening_lock));
+	ASSERT(!BP_IS_REDACTED(bp));
 
 	/*
 	 * The $ORIGIN dataset (if it exists) doesn't have an associated
@@ -1346,13 +1347,6 @@ dmu_objset_clone_check(void *arg, dmu_tx_t *tx)
 		dsl_dataset_rele(origin, FTAG);
 		dsl_dir_rele(pdd, FTAG);
 		return (SET_ERROR(EINVAL));
-	}
-
-	error = dmu_objset_clone_crypt_check(pdd, origin->ds_dir);
-	if (error != 0) {
-		dsl_dataset_rele(origin, FTAG);
-		dsl_dir_rele(pdd, FTAG);
-		return (error);
 	}
 
 	dsl_dataset_rele(origin, FTAG);

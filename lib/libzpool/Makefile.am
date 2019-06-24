@@ -59,6 +59,7 @@ KERNEL_C = \
 	dmu_object.c \
 	dmu_objset.c \
 	dmu_recv.c \
+	dmu_redact.c \
 	dmu_send.c \
 	dmu_traverse.c \
 	dmu_tx.c \
@@ -86,6 +87,7 @@ KERNEL_C = \
 	metaslab.c \
 	mmp.c \
 	multilist.c \
+	objlist.c \
 	pathname.c \
 	range_tree.c \
 	refcount.c \
@@ -130,6 +132,7 @@ KERNEL_C = \
 	vdev_raidz_math_ssse3.c \
 	vdev_removal.c \
 	vdev_root.c \
+	vdev_trim.c \
 	zap.c \
 	zap_leaf.c \
 	zap_micro.c \

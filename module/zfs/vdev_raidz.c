@@ -37,7 +37,7 @@
 #include <sys/vdev_raidz_impl.h>
 
 #ifdef ZFS_DEBUG
-#include <sys/vdev_initialize.h>	/* vdev_xlate testing */
+#include <sys/vdev.h>	/* For vdev_xlate() in vdev_raidz_io_verify() */
 #endif
 
 /*
@@ -2274,16 +2274,21 @@ vdev_raidz_io_done(zio_t *zio)
 
 		if (!(zio->io_flags & ZIO_FLAG_SPECULATIVE)) {
 			for (c = 0; c < rm->rm_cols; c++) {
+				vdev_t *cvd;
 				rc = &rm->rm_col[c];
+				cvd = vd->vdev_child[rc->rc_devidx];
 				if (rc->rc_error == 0) {
 					zio_bad_cksum_t zbc;
 					zbc.zbc_has_cksum = 0;
 					zbc.zbc_injected =
 					    rm->rm_ecksuminjected;
 
+					mutex_enter(&cvd->vdev_stat_lock);
+					cvd->vdev_stat.vs_checksum_errors++;
+					mutex_exit(&cvd->vdev_stat_lock);
+
 					zfs_ereport_start_checksum(
-					    zio->io_spa,
-					    vd->vdev_child[rc->rc_devidx],
+					    zio->io_spa, cvd,
 					    &zio->io_bookmark, zio,
 					    rc->rc_offset, rc->rc_size,
 					    (void *)(uintptr_t)c, &zbc);
@@ -2398,17 +2403,17 @@ vdev_raidz_xlate(vdev_t *cvd, const range_seg_t *in, range_seg_t *res)
 }
 
 vdev_ops_t vdev_raidz_ops = {
-	vdev_raidz_open,
-	vdev_raidz_close,
-	vdev_raidz_asize,
-	vdev_raidz_io_start,
-	vdev_raidz_io_done,
-	vdev_raidz_state_change,
-	vdev_raidz_need_resilver,
-	NULL,
-	NULL,
-	NULL,
-	vdev_raidz_xlate,
-	VDEV_TYPE_RAIDZ,	/* name of this vdev type */
-	B_FALSE			/* not a leaf vdev */
+	.vdev_op_open = vdev_raidz_open,
+	.vdev_op_close = vdev_raidz_close,
+	.vdev_op_asize = vdev_raidz_asize,
+	.vdev_op_io_start = vdev_raidz_io_start,
+	.vdev_op_io_done = vdev_raidz_io_done,
+	.vdev_op_state_change = vdev_raidz_state_change,
+	.vdev_op_need_resilver = vdev_raidz_need_resilver,
+	.vdev_op_hold = NULL,
+	.vdev_op_rele = NULL,
+	.vdev_op_remap = NULL,
+	.vdev_op_xlate = vdev_raidz_xlate,
+	.vdev_op_type = VDEV_TYPE_RAIDZ,	/* name of this vdev type */
+	.vdev_op_leaf = B_FALSE			/* not a leaf vdev */
 };
