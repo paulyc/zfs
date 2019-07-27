@@ -342,7 +342,6 @@ int dmu_objset_find(char *name, int func(const char *, void *), void *arg,
 void dmu_objset_byteswap(void *buf, size_t size);
 int dsl_dataset_rename_snapshot(const char *fsname,
     const char *oldsnapname, const char *newsnapname, boolean_t recursive);
-int dmu_objset_remap_indirects(const char *fsname);
 
 typedef struct dmu_buf {
 	uint64_t db_object;		/* object that this buffer is part of */
@@ -383,6 +382,8 @@ typedef struct dmu_buf {
 #define	DMU_POOL_OBSOLETE_BPOBJ		"com.delphix:obsolete_bpobj"
 #define	DMU_POOL_CONDENSING_INDIRECT	"com.delphix:condensing_indirect"
 #define	DMU_POOL_ZPOOL_CHECKPOINT	"com.delphix:zpool_checkpoint"
+#define	DMU_POOL_LOG_SPACEMAP_ZAP	"com.delphix:log_spacemap_zap"
+#define	DMU_POOL_DELETED_CLONES		"com.delphix:deleted_clones"
 
 /*
  * Allocate an object from this objset.  The range of object numbers
@@ -497,9 +498,6 @@ void dmu_object_set_checksum(objset_t *os, uint64_t object, uint8_t checksum,
  */
 void dmu_object_set_compress(objset_t *os, uint64_t object, uint8_t compress,
     dmu_tx_t *tx);
-
-
-int dmu_object_remap_indirects(objset_t *os, uint64_t object, uint64_t txg);
 
 void dmu_write_embedded(objset_t *os, uint64_t object, uint64_t offset,
     void *data, uint8_t etype, uint8_t comp, int uncompressed_size,
@@ -777,7 +775,6 @@ void dmu_tx_hold_free(dmu_tx_t *tx, uint64_t object, uint64_t off,
     uint64_t len);
 void dmu_tx_hold_free_by_dnode(dmu_tx_t *tx, dnode_t *dn, uint64_t off,
     uint64_t len);
-void dmu_tx_hold_remap_l1indirect(dmu_tx_t *tx, uint64_t object);
 void dmu_tx_hold_zap(dmu_tx_t *tx, uint64_t object, int add, const char *name);
 void dmu_tx_hold_zap_by_dnode(dmu_tx_t *tx, dnode_t *dn, int add,
     const char *name);
@@ -1007,6 +1004,7 @@ extern uint64_t dmu_objset_id(objset_t *os);
 extern uint64_t dmu_objset_dnodesize(objset_t *os);
 extern zfs_sync_type_t dmu_objset_syncprop(objset_t *os);
 extern zfs_logbias_op_t dmu_objset_logbias(objset_t *os);
+extern int dmu_objset_blksize(objset_t *os);
 extern int dmu_snapshot_list_next(objset_t *os, int namelen, char *name,
     uint64_t *id, uint64_t *offp, boolean_t *case_conflict);
 extern int dmu_snapshot_lookup(objset_t *os, const char *name, uint64_t *val);

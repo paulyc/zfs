@@ -1676,11 +1676,15 @@ dsl_dataset_promote_crypt_check(dsl_dir_t *target, dsl_dir_t *origin)
 	 * Check that the parent of the target has the same encryption root.
 	 */
 	ret = dsl_dir_get_encryption_root_ddobj(origin->dd_parent, &op_rddobj);
-	if (ret != 0)
+	if (ret == ENOENT)
+		return (SET_ERROR(EACCES));
+	else if (ret != 0)
 		return (ret);
 
 	ret = dsl_dir_get_encryption_root_ddobj(target->dd_parent, &tp_rddobj);
-	if (ret != 0)
+	if (ret == ENOENT)
+		return (SET_ERROR(EACCES));
+	else if (ret != 0)
 		return (ret);
 
 	if (op_rddobj != tp_rddobj)
@@ -2620,11 +2624,13 @@ dsl_dataset_crypt_stats(dsl_dataset_t *ds, nvlist_t *nv)
 	}
 
 	if (dsl_dir_get_encryption_root_ddobj(dd, &intval) == 0) {
-		VERIFY0(dsl_dir_hold_obj(dd->dd_pool, intval, NULL, FTAG,
-		    &enc_root));
-		dsl_dir_name(enc_root, buf);
-		dsl_dir_rele(enc_root, FTAG);
-		dsl_prop_nvlist_add_string(nv, ZFS_PROP_ENCRYPTION_ROOT, buf);
+		if (dsl_dir_hold_obj(dd->dd_pool, intval, NULL, FTAG,
+		    &enc_root) == 0) {
+			dsl_dir_name(enc_root, buf);
+			dsl_dir_rele(enc_root, FTAG);
+			dsl_prop_nvlist_add_string(nv,
+			    ZFS_PROP_ENCRYPTION_ROOT, buf);
+		}
 	}
 }
 

@@ -1047,14 +1047,6 @@ zfs_secpolicy_bookmark(zfs_cmd_t *zc, nvlist_t *innvl, cred_t *cr)
 
 /* ARGSUSED */
 static int
-zfs_secpolicy_remap(zfs_cmd_t *zc, nvlist_t *innvl, cred_t *cr)
-{
-	return (zfs_secpolicy_write_perms(zc->zc_name,
-	    ZFS_DELEG_PERM_REMAP, cr));
-}
-
-/* ARGSUSED */
-static int
 zfs_secpolicy_destroy_bookmarks(zfs_cmd_t *zc, nvlist_t *innvl, cred_t *cr)
 {
 	nvpair_t *pair, *nextpair;
@@ -3447,11 +3439,8 @@ static const zfs_ioc_key_t zfs_keys_remap[] = {
 static int
 zfs_ioc_remap(const char *fsname, nvlist_t *innvl, nvlist_t *outnvl)
 {
-	if (strchr(fsname, '@') ||
-	    strchr(fsname, '%'))
-		return (SET_ERROR(EINVAL));
-
-	return (dmu_objset_remap_indirects(fsname));
+	/* This IOCTL is no longer supported. */
+	return (0);
 }
 
 /*
@@ -6790,7 +6779,7 @@ zfs_ioctl_init(void)
 	    zfs_keys_clone, ARRAY_SIZE(zfs_keys_clone));
 
 	zfs_ioctl_register("remap", ZFS_IOC_REMAP,
-	    zfs_ioc_remap, zfs_secpolicy_remap, DATASET_NAME,
+	    zfs_ioc_remap, zfs_secpolicy_none, DATASET_NAME,
 	    POOL_CHECK_SUSPENDED | POOL_CHECK_READONLY, B_FALSE, B_TRUE,
 	    zfs_keys_remap, ARRAY_SIZE(zfs_keys_remap));
 
@@ -7342,7 +7331,8 @@ zfsdev_ioctl(struct file *filp, unsigned cmd, unsigned long arg)
 
 	zc = kmem_zalloc(sizeof (zfs_cmd_t), KM_SLEEP);
 
-	error = ddi_copyin((void *)arg, zc, sizeof (zfs_cmd_t), flag);
+	error = ddi_copyin((void *)(uintptr_t)arg, zc, sizeof (zfs_cmd_t),
+	    flag);
 	if (error != 0) {
 		error = SET_ERROR(EFAULT);
 		goto out;
@@ -7509,7 +7499,7 @@ zfsdev_ioctl(struct file *filp, unsigned cmd, unsigned long arg)
 
 out:
 	nvlist_free(innvl);
-	rc = ddi_copyout(zc, (void *)arg, sizeof (zfs_cmd_t), flag);
+	rc = ddi_copyout(zc, (void *)(uintptr_t)arg, sizeof (zfs_cmd_t), flag);
 	if (error == 0 && rc != 0)
 		error = SET_ERROR(EFAULT);
 	if (error == 0 && vec->zvec_allow_log) {
