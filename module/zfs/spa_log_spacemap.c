@@ -180,7 +180,7 @@
 unsigned long zfs_log_sm_blksz = 1ULL << 17;
 
 /*
- * Percentage of the overall system’s memory that ZFS allows to be
+ * Percentage of the overall system's memory that ZFS allows to be
  * used for unflushed changes (e.g. the sum of size of all the nodes
  * in the unflushed trees).
  *
@@ -392,7 +392,7 @@ summary_entry_is_full(spa_t *spa, log_summary_entry_t *e)
  * Update the log summary information to reflect the fact that a metaslab
  * was flushed or destroyed (e.g due to device removal or pool export/destroy).
  *
- * We typically flush the oldest flushed metaslab so the first (and olderst)
+ * We typically flush the oldest flushed metaslab so the first (and oldest)
  * entry of the summary is updated. However if that metaslab is getting loaded
  * we may flush the second oldest one which may be part of an entry later in
  * the summary. Moreover, if we call into this function from metaslab_fini()
@@ -838,7 +838,7 @@ spa_flush_metaslabs(spa_t *spa, dmu_tx_t *tx)
 
 /*
  * Close the log space map for this TXG and update the block counts
- * for the the log's in-memory structure and the summary.
+ * for the log's in-memory structure and the summary.
  */
 void
 spa_sync_close_syncing_log_sm(spa_t *spa)
@@ -989,7 +989,7 @@ spa_ld_log_sm_metadata(spa_t *spa)
 		/* the space map ZAP doesn't exist yet */
 		return (0);
 	} else if (error != 0) {
-		spa_load_failed(spa, "spa_ld_unflushed_txgs(): failed at "
+		spa_load_failed(spa, "spa_ld_log_sm_metadata(): failed at "
 		    "zap_lookup(DMU_POOL_DIRECTORY_OBJECT) [error %d]",
 		    error);
 		return (error);
@@ -998,19 +998,45 @@ spa_ld_log_sm_metadata(spa_t *spa)
 	zap_cursor_t zc;
 	zap_attribute_t za;
 	for (zap_cursor_init(&zc, spa_meta_objset(spa), spacemap_zap);
-	    zap_cursor_retrieve(&zc, &za) == 0; zap_cursor_advance(&zc)) {
+	    (error = zap_cursor_retrieve(&zc, &za)) == 0;
+	    zap_cursor_advance(&zc)) {
 		uint64_t log_txg = zfs_strtonum(za.za_name, NULL);
 		spa_log_sm_t *sls =
 		    spa_log_sm_alloc(za.za_first_integer, log_txg);
 		avl_add(&spa->spa_sm_logs_by_txg, sls);
 	}
 	zap_cursor_fini(&zc);
+	if (error != ENOENT) {
+		spa_load_failed(spa, "spa_ld_log_sm_metadata(): failed at "
+		    "zap_cursor_retrieve(spacemap_zap) [error %d]",
+		    error);
+		return (error);
+	}
 
 	for (metaslab_t *m = avl_first(&spa->spa_metaslabs_by_flushed);
 	    m; m = AVL_NEXT(&spa->spa_metaslabs_by_flushed, m)) {
 		spa_log_sm_t target = { .sls_txg = metaslab_unflushed_txg(m) };
 		spa_log_sm_t *sls = avl_find(&spa->spa_sm_logs_by_txg,
 		    &target, NULL);
+
+		/*
+		 * At this point if sls is zero it means that a bug occurred
+		 * in ZFS the last time the pool was open or earlier in the
+		 * import code path. In general, we would have placed a
+		 * VERIFY() here or in this case just let the kernel panic
+		 * with NULL pointer dereference when incrementing sls_mscount,
+		 * but since this is the import code path we can be a bit more
+		 * lenient. Thus, for DEBUG bits we always cause a panic, while
+		 * in production we log the error and just fail the import.
+		 */
+		ASSERT(sls != NULL);
+		if (sls == NULL) {
+			spa_load_failed(spa, "spa_ld_log_sm_metadata(): bug "
+			    "encountered: could not find log spacemap for "
+			    "TXG %ld [error %d]",
+			    metaslab_unflushed_txg(m), ENOENT);
+			return (ENOENT);
+		}
 		sls->sls_mscount++;
 	}
 
@@ -1163,6 +1189,7 @@ out:
 
 		if (metaslab_debug_load && m->ms_sm != NULL) {
 			VERIFY0(metaslab_load(m));
+			metaslab_set_selected_txg(m, 0);
 		}
 		mutex_exit(&m->ms_lock);
 	}
@@ -1255,54 +1282,41 @@ spa_ld_log_spacemaps(spa_t *spa)
 	return (error);
 }
 
-#if defined(_KERNEL)
 /* BEGIN CSTYLED */
-module_param(zfs_unflushed_max_mem_amt, ulong, 0644);
-MODULE_PARM_DESC(zfs_unflushed_max_mem_amt,
+ZFS_MODULE_PARAM(zfs, zfs_, unflushed_max_mem_amt, ULONG, ZMOD_RW,
     "Specific hard-limit in memory that ZFS allows to be used for "
     "unflushed changes");
 
-module_param(zfs_unflushed_max_mem_ppm, ulong, 0644);
-MODULE_PARM_DESC(zfs_unflushed_max_mem_ppm,
+ZFS_MODULE_PARAM(zfs, zfs_, unflushed_max_mem_ppm, ULONG, ZMOD_RW,
     "Percentage of the overall system memory that ZFS allows to be "
     "used for unflushed changes (value is calculated over 1000000 for "
     "finer granularity");
 
-module_param(zfs_unflushed_log_block_max, ulong, 0644);
-MODULE_PARM_DESC(zfs_unflushed_log_block_max,
+ZFS_MODULE_PARAM(zfs, zfs_, unflushed_log_block_max, ULONG, ZMOD_RW,
     "Hard limit (upper-bound) in the size of the space map log "
     "in terms of blocks.");
 
-module_param(zfs_unflushed_log_block_min, ulong, 0644);
-MODULE_PARM_DESC(zfs_unflushed_log_block_min,
+ZFS_MODULE_PARAM(zfs, zfs_, unflushed_log_block_min, ULONG, ZMOD_RW,
     "Lower-bound limit for the maximum amount of blocks allowed in "
     "log spacemap (see zfs_unflushed_log_block_max)");
 
-module_param(zfs_unflushed_log_block_pct, ulong, 0644);
-MODULE_PARM_DESC(zfs_unflushed_log_block_pct,
-    "Tunable used to determine the number of blocks that can be "
-    "used for the spacemap log, expressed as a percentage of the "
-    " total number of metaslabs in the pool (e.g. 400 means the "
-    " number of log blocks is capped at 4 times the number of "
-    "metaslabs)");
+ZFS_MODULE_PARAM(zfs, zfs_, unflushed_log_block_pct, ULONG, ZMOD_RW,
+    "Tunable used to determine the number of blocks that can be used for "
+    "the spacemap log, expressed as a percentage of the total number of "
+    "metaslabs in the pool (e.g. 400 means the number of log blocks is "
+    "capped at 4 times the number of metaslabs)");
 
-module_param(zfs_max_log_walking, ulong, 0644);
-MODULE_PARM_DESC(zfs_max_log_walking,
+ZFS_MODULE_PARAM(zfs, zfs_, max_log_walking, ULONG, ZMOD_RW,
     "The number of past TXGs that the flushing algorithm of the log "
     "spacemap feature uses to estimate incoming log blocks");
 
-module_param(zfs_max_logsm_summary_length, ulong, 0644);
-MODULE_PARM_DESC(zfs_max_logsm_summary_length,
-    "Maximum number of rows allowed in the summary of "
-    "the spacemap log");
+ZFS_MODULE_PARAM(zfs, zfs_, max_logsm_summary_length, ULONG, ZMOD_RW,
+    "Maximum number of rows allowed in the summary of the spacemap log");
 
-module_param(zfs_min_metaslabs_to_flush, ulong, 0644);
-MODULE_PARM_DESC(zfs_min_metaslabs_to_flush,
+ZFS_MODULE_PARAM(zfs, zfs_, min_metaslabs_to_flush, ULONG, ZMOD_RW,
     "Minimum number of metaslabs to flush per dirty TXG");
 
-module_param(zfs_keep_log_spacemaps_at_export, int, 0644);
-MODULE_PARM_DESC(zfs_keep_log_spacemaps_at_export,
+ZFS_MODULE_PARAM(zfs, zfs_, keep_log_spacemaps_at_export, INT, ZMOD_RW,
     "Prevent the log spacemaps from being flushed and destroyed "
     "during pool export/destroy");
 /* END CSTYLED */
-#endif

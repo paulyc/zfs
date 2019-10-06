@@ -20,7 +20,7 @@
  */
 
 /*
- * Copyright (c) 2016 by Delphix. All rights reserved.
+ * Copyright (c) 2016, 2019 by Delphix. All rights reserved.
  */
 
 #include <sys/spa.h>
@@ -46,7 +46,7 @@ unsigned long zfs_initialize_value = 0xdeadbeefdeadbeeeULL;
 int zfs_initialize_limit = 1;
 
 /* size of initializing writes; default 1MiB, see zfs_remove_max_segment */
-uint64_t zfs_initialize_chunk_size = 1024 * 1024;
+unsigned long zfs_initialize_chunk_size = 1024 * 1024;
 
 static boolean_t
 vdev_initialize_should_stop(vdev_t *vd)
@@ -150,6 +150,9 @@ vdev_initialize_change_state(vdev_t *vd, vdev_initializing_state_t new_state)
 	}
 
 	dmu_tx_commit(tx);
+
+	if (new_state != VDEV_INITIALIZE_ACTIVE)
+		spa_notify_waiters(spa);
 }
 
 static void
@@ -483,6 +486,7 @@ vdev_initialize_thread(void *arg)
 	for (uint64_t i = 0; !vd->vdev_detached &&
 	    i < vd->vdev_top->vdev_ms_count; i++) {
 		metaslab_t *msp = vd->vdev_top->vdev_ms[i];
+		boolean_t unload_when_done = B_FALSE;
 
 		/*
 		 * If we've expanded the top-level vdev or it's our
@@ -496,6 +500,8 @@ vdev_initialize_thread(void *arg)
 		spa_config_exit(spa, SCL_CONFIG, FTAG);
 		metaslab_disable(msp);
 		mutex_enter(&msp->ms_lock);
+		if (!msp->ms_loaded && !msp->ms_loading)
+			unload_when_done = B_TRUE;
 		VERIFY0(metaslab_load(msp));
 
 		range_tree_walk(msp->ms_allocatable, vdev_initialize_range_add,
@@ -503,7 +509,7 @@ vdev_initialize_thread(void *arg)
 		mutex_exit(&msp->ms_lock);
 
 		error = vdev_initialize_ranges(vd, deadbeef);
-		metaslab_enable(msp, B_TRUE);
+		metaslab_enable(msp, B_TRUE, unload_when_done);
 		spa_config_enter(spa, SCL_CONFIG, FTAG, RW_READER);
 
 		range_tree_vacate(vd->vdev_initialize_tree, NULL, NULL);
@@ -599,7 +605,7 @@ vdev_initialize_stop_wait(spa_t *spa, list_t *vd_list)
 }
 
 /*
- * Stop initializing a device, with the resultant initialing state being
+ * Stop initializing a device, with the resultant initializing state being
  * tgt_state.  For blocking behavior pass NULL for vd_list.  Otherwise, when
  * a list_t is provided the stopping vdev is inserted in to the list.  Callers
  * are then required to call vdev_initialize_stop_wait() to block for all the
@@ -720,15 +726,16 @@ vdev_initialize_restart(vdev_t *vd)
 	}
 }
 
-#if defined(_KERNEL)
 EXPORT_SYMBOL(vdev_initialize);
 EXPORT_SYMBOL(vdev_initialize_stop);
 EXPORT_SYMBOL(vdev_initialize_stop_all);
 EXPORT_SYMBOL(vdev_initialize_stop_wait);
 EXPORT_SYMBOL(vdev_initialize_restart);
 
-/* CSTYLED */
-module_param(zfs_initialize_value, ulong, 0644);
-MODULE_PARM_DESC(zfs_initialize_value,
+/* BEGIN CSTYLED */
+ZFS_MODULE_PARAM(zfs, zfs_, initialize_value, ULONG, ZMOD_RW,
 	"Value written during zpool initialize");
-#endif
+
+ZFS_MODULE_PARAM(zfs, zfs_, initialize_chunk_size, ULONG, ZMOD_RW,
+	"Size in bytes of writes by zpool initialize");
+/* END CSTYLED */

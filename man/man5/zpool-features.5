@@ -248,7 +248,7 @@ DEPENDENCIES	bookmark, extensible_dataset, bookmark_v2
 .TE
 
 This feature enables additional bookmark accounting fields, enabling the
-written#<bookmark> prperty (space written since a bookmark) and estimates of
+written#<bookmark> property (space written since a bookmark) and estimates of
 send stream sizes for incrementals from bookmarks.
 
 This feature becomes \fBactive\fR when a bookmark is created and will be
@@ -565,6 +565,28 @@ All blocks allocated and freed after a clone is created are tracked by the
 the clone's livelist which is referenced during the deletion of the clone.
 The feature is activated when a clone is created and remains active until all
 clones have been destroyed.
+.RE
+
+.sp
+.ne 2
+.na
+\fBlog_spacemap\fR
+.ad
+.RS 4n
+.TS
+l l .
+GUID	com.delphix:log_spacemap
+READ\-ONLY COMPATIBLE	yes
+DEPENDENCIES	com.delphix:spacemap_v2
+.TE
+
+This feature improves performance for heavily-fragmented pools,
+especially when workloads are heavy in random-writes. It does so by
+logging all the metaslab changes on a single spacemap every TXG
+instead of scattering multiple writes to all the metaslab spacemaps.
+
+This feature becomes \fBactive\fR as soon as it is enabled and will never
+return to being \fBenabled\fR.
 .RE
 
 .sp

@@ -548,7 +548,7 @@ dump_write(dmu_send_cookie_t *dscp, dmu_object_type_t type, uint64_t object,
 		/*
 		 * There's no pre-computed checksum for partial-block writes,
 		 * embedded BP's, or encrypted BP's that are being sent as
-		 * plaintext, so (like fletcher4-checkummed blocks) userland
+		 * plaintext, so (like fletcher4-checksummed blocks) userland
 		 * will have to compute a dedup-capable checksum itself.
 		 */
 		drrw->drr_checksumtype = ZIO_CHECKSUM_OFF;
@@ -2262,7 +2262,7 @@ setup_send_progress(struct dmu_send_params *dspp)
  *
  * The final case is a simple zfs full or incremental send.  The to_ds traversal
  * thread behaves the same as always. The redact list thread is never started.
- * The send merge thread takes all the blocks that the to_ds traveral thread
+ * The send merge thread takes all the blocks that the to_ds traversal thread
  * sends it, prefetches the data, and sends the blocks on to the main thread.
  * The main thread sends the data over the wire.
  *
@@ -2925,29 +2925,25 @@ dmu_send_estimate_fast(dsl_dataset_t *ds, dsl_dataset_t *fromds,
 	return (err);
 }
 
-#if defined(_KERNEL)
-module_param(zfs_send_corrupt_data, int, 0644);
-MODULE_PARM_DESC(zfs_send_corrupt_data, "Allow sending corrupt data");
+/* BEGIN CSTYLED */
+ZFS_MODULE_PARAM(zfs_send, zfs_send_, corrupt_data, INT, ZMOD_RW,
+	"Allow sending corrupt data");
 
-module_param(zfs_send_queue_length, int, 0644);
-MODULE_PARM_DESC(zfs_send_queue_length, "Maximum send queue length");
+ZFS_MODULE_PARAM(zfs_send, zfs_send_, queue_length, INT, ZMOD_RW,
+	"Maximum send queue length");
 
-module_param(zfs_send_unmodified_spill_blocks, int, 0644);
-MODULE_PARM_DESC(zfs_send_unmodified_spill_blocks,
+ZFS_MODULE_PARAM(zfs_send, zfs_send_, unmodified_spill_blocks, INT, ZMOD_RW,
 	"Send unmodified spill blocks");
 
-module_param(zfs_send_no_prefetch_queue_length, int, 0644);
-MODULE_PARM_DESC(zfs_send_no_prefetch_queue_length,
+ZFS_MODULE_PARAM(zfs_send, zfs_send_, no_prefetch_queue_length, INT, ZMOD_RW,
 	"Maximum send queue length for non-prefetch queues");
 
-module_param(zfs_send_queue_ff, int, 0644);
-MODULE_PARM_DESC(zfs_send_queue_ff, "Send queue fill fraction");
+ZFS_MODULE_PARAM(zfs_send, zfs_send_, queue_ff, INT, ZMOD_RW,
+	"Send queue fill fraction");
 
-module_param(zfs_send_no_prefetch_queue_ff, int, 0644);
-MODULE_PARM_DESC(zfs_send_no_prefetch_queue_ff,
+ZFS_MODULE_PARAM(zfs_send, zfs_send_, no_prefetch_queue_ff, INT, ZMOD_RW,
 	"Send queue fill fraction for non-prefetch queues");
 
-module_param(zfs_override_estimate_recordsize, int, 0644);
-MODULE_PARM_DESC(zfs_override_estimate_recordsize,
+ZFS_MODULE_PARAM(zfs_send, zfs_, override_estimate_recordsize, INT, ZMOD_RW,
 	"Override block size estimate with fixed size");
-#endif
+/* END CSTYLED */

@@ -837,7 +837,7 @@ vdev_trim_thread(void *arg)
 		 */
 		if (msp->ms_sm == NULL && vd->vdev_trim_partial) {
 			mutex_exit(&msp->ms_lock);
-			metaslab_enable(msp, B_FALSE);
+			metaslab_enable(msp, B_FALSE, B_FALSE);
 			spa_config_enter(spa, SCL_CONFIG, FTAG, RW_READER);
 			vdev_trim_calculate_progress(vd);
 			continue;
@@ -849,7 +849,7 @@ vdev_trim_thread(void *arg)
 		mutex_exit(&msp->ms_lock);
 
 		error = vdev_trim_ranges(&ta);
-		metaslab_enable(msp, B_TRUE);
+		metaslab_enable(msp, B_TRUE, B_FALSE);
 		spa_config_enter(spa, SCL_CONFIG, FTAG, RW_READER);
 
 		range_tree_vacate(ta.trim_tree, NULL, NULL);
@@ -1154,7 +1154,7 @@ vdev_autotrim_thread(void *arg)
 			if (msp->ms_sm == NULL ||
 			    range_tree_is_empty(msp->ms_trim)) {
 				mutex_exit(&msp->ms_lock);
-				metaslab_enable(msp, B_FALSE);
+				metaslab_enable(msp, B_FALSE, B_FALSE);
 				continue;
 			}
 
@@ -1170,7 +1170,7 @@ vdev_autotrim_thread(void *arg)
 			 */
 			if (msp->ms_disabled > 1) {
 				mutex_exit(&msp->ms_lock);
-				metaslab_enable(msp, B_FALSE);
+				metaslab_enable(msp, B_FALSE, B_FALSE);
 				continue;
 			}
 
@@ -1288,7 +1288,7 @@ vdev_autotrim_thread(void *arg)
 			range_tree_vacate(trim_tree, NULL, NULL);
 			range_tree_destroy(trim_tree);
 
-			metaslab_enable(msp, issued_trim);
+			metaslab_enable(msp, issued_trim, B_FALSE);
 			spa_config_enter(spa, SCL_CONFIG, FTAG, RW_READER);
 
 			for (uint64_t c = 0; c < children; c++) {
@@ -1425,7 +1425,6 @@ vdev_autotrim_restart(spa_t *spa)
 		vdev_autotrim(spa);
 }
 
-#if defined(_KERNEL)
 EXPORT_SYMBOL(vdev_trim);
 EXPORT_SYMBOL(vdev_trim_stop);
 EXPORT_SYMBOL(vdev_trim_stop_all);
@@ -1437,24 +1436,18 @@ EXPORT_SYMBOL(vdev_autotrim_stop_wait);
 EXPORT_SYMBOL(vdev_autotrim_restart);
 
 /* BEGIN CSTYLED */
-module_param(zfs_trim_extent_bytes_max, uint, 0644);
-MODULE_PARM_DESC(zfs_trim_extent_bytes_max,
+ZFS_MODULE_PARAM(zfs_trim, zfs_trim_, extent_bytes_max, UINT, ZMOD_RW,
     "Max size of TRIM commands, larger will be split");
 
-module_param(zfs_trim_extent_bytes_min, uint, 0644);
-MODULE_PARM_DESC(zfs_trim_extent_bytes_min,
+ZFS_MODULE_PARAM(zfs_trim, zfs_trim_, extent_bytes_min, UINT, ZMOD_RW,
     "Min size of TRIM commands, smaller will be skipped");
 
-module_param(zfs_trim_metaslab_skip, uint, 0644);
-MODULE_PARM_DESC(zfs_trim_metaslab_skip,
+ZFS_MODULE_PARAM(zfs_trim, zfs_trim_, metaslab_skip, UINT, ZMOD_RW,
     "Skip metaslabs which have never been initialized");
 
-module_param(zfs_trim_txg_batch, uint, 0644);
-MODULE_PARM_DESC(zfs_trim_txg_batch,
+ZFS_MODULE_PARAM(zfs_trim, zfs_trim_, txg_batch, UINT, ZMOD_RW,
     "Min number of txgs to aggregate frees before issuing TRIM");
 
-module_param(zfs_trim_queue_limit, uint, 0644);
-MODULE_PARM_DESC(zfs_trim_queue_limit,
+ZFS_MODULE_PARAM(zfs_trim, zfs_trim_, queue_limit, UINT, ZMOD_RW,
     "Max queued TRIMs outstanding per leaf vdev");
 /* END CSTYLED */
-#endif
