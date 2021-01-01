@@ -30,13 +30,12 @@
  * CDDL HEADER END
  */
 
-AC_INIT(m4_esyscmd(grep ^Name: META | cut -d ':' -f 2 | tr -d ' \n'),
-	m4_esyscmd(grep ^Version: META | cut -d ':' -f 2 | tr -d ' \n'))
+AC_INIT([m4_esyscmd(grep ^Name: META | cut -d ':' -f 2 | tr -d ' \n')], [m4_esyscmd(grep ^Version: META | cut -d ':' -f 2 | tr -d ' \n')])
 AC_LANG(C)
 ZFS_AC_META
 AC_CONFIG_AUX_DIR([config])
 AC_CONFIG_MACRO_DIR([config])
-AC_CANONICAL_SYSTEM
+AC_CANONICAL_TARGET
 AM_MAINTAINER_MODE
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 AM_INIT_AUTOMAKE([subdir-objects])
@@ -47,7 +46,7 @@ AC_CONFIG_HEADERS([zfs_config.h], [
 
 AC_PROG_INSTALL
 AC_PROG_CC
-AC_PROG_LIBTOOL
+LT_INIT
 PKG_PROG_PKG_CONFIG
 AM_PROG_AS
 AM_PROG_CC_C_O
@@ -62,7 +61,7 @@ ZFS_AC_DEBUGINFO
 ZFS_AC_DEBUG_KMEM
 ZFS_AC_DEBUG_KMEM_TRACKING
 
-AC_CONFIG_FILES([
+AC_CONFIG_FILES([ po/Makefile.in
 	Makefile
 	cmd/Makefile
 	cmd/arc_summary/Makefile

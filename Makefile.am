@@ -1,6 +1,6 @@
 ACLOCAL_AMFLAGS = -I config
 
-SUBDIRS = include
+SUBDIRS = po include
 if BUILD_LINUX
 SUBDIRS += rpm
 endif
